@@ -5,6 +5,21 @@ function do_insert {
     mysql -h$dbHost -u$dbUser -p$dbPassword a -e "insert into $table values($id, '$id-c')"
 }
 
+function verify {
+    local table=$1 from=$2 end=$3
+    local expect=$((end-from))
+    echo -n "Verify [$table] [$from,$end) Expect: $expect ..."
+    local cnt=$(mysql -h$dbHost -u$dbUser -p$dbPassword a \
+                 -e "select count(1) from $table where id >=$2 and id <$3" \
+                 | sed -e 1d)
+    if [ $cnt -ne $expect ]
+    then
+        echo " ERROR ! count=$cnt "
+        exit 1
+    fi
+    echo " Pass !"
+}
+
 function do_insert_batch {
     local table=$1 start=$2 step=$3 batch=$4
     for i in {1..$batch}
@@ -17,10 +32,13 @@ function fork_one {
     local index=$1
     shift
     local table=$1 start=$2 step=$3 count=$4
-    do_insert_batch $table $start $step $count &>/dev/null &
+    mkdir -p log/$table/
+    local log=log/$table/$index.log
+    echo "==New-Thread===" >>$log
+    do_insert_batch $table $start $step $count &>>$log &
     local child_pid=$!
     eval pid_$index=$child_pid
-    echo "[$index] forked child : $child_pid"
+    echo "[$table.$index] forked child : $child_pid for [$start $step $count]"
 }
 
 function do_concurrent_insert {
@@ -37,6 +55,8 @@ function do_concurrent_insert {
         echo "[$i] child : $pidx completed."
     done
     echo "All child completed."
+    echo "Verify Inserts ..."
+    verify $table $start $((start + concurrency*batch))
 }
 
 function single_table_cc {
